@@ -7,7 +7,7 @@ const Committee = () => {
 
             <div className="hawkins-container" style={{ maxWidth: '1200px', width: '100%' }}>
                 <p className="stranger-text" style={{ textAlign: 'center' }}>
-                    Coming Soon...
+                    haritanu
                 </p>
             </div>
         </div>
