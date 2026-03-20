@@ -15,11 +15,29 @@ app.use(express.json());
 let pool;
 let dbReady = false;
 
-async function createPool() {
-  pool = mysql.createPool({
+function getDbCoreConfig() {
+  const config = {
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASSWORD || '',
+  };
+
+  const parsedPort = Number(process.env.DB_PORT);
+  if (Number.isInteger(parsedPort) && parsedPort > 0) {
+    config.port = parsedPort;
+  }
+
+  // Some managed MySQL providers require TLS connections.
+  if (process.env.DB_SSL === 'true') {
+    config.ssl = { rejectUnauthorized: false };
+  }
+
+  return config;
+}
+
+async function createPool() {
+  pool = mysql.createPool({
+    ...getDbCoreConfig(),
     database: process.env.DB_NAME || 'procomm_literary',
     waitForConnections: true,
     connectionLimit: 10,
@@ -29,14 +47,33 @@ async function createPool() {
 // ─── Initialize Database Tables ─────────────────────────────────────
 export async function initDB() {
   try {
-    // Create database if it doesn't exist
-    const tempConn = await mysql.createConnection({
-      host: process.env.DB_HOST || 'localhost',
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || '',
-    });
-    await tempConn.query(`CREATE DATABASE IF NOT EXISTS \`${process.env.DB_NAME || 'procomm_literary'}\``);
-    await tempConn.end();
+    const dbName = process.env.DB_NAME || 'procomm_literary';
+    const shouldCreateDatabase = process.env.DB_SKIP_CREATE_DB !== 'true';
+
+    if (shouldCreateDatabase) {
+      let tempConn;
+      try {
+        // This can fail on managed DB users without global CREATE DATABASE privilege.
+        tempConn = await mysql.createConnection(getDbCoreConfig());
+        await tempConn.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
+      } catch (createErr) {
+        const permissionCodes = new Set([
+          'ER_DBACCESS_DENIED_ERROR',
+          'ER_ACCESS_DENIED_ERROR',
+          'ER_SPECIFIC_ACCESS_DENIED_ERROR',
+        ]);
+
+        if (permissionCodes.has(createErr.code)) {
+          console.warn('⚠️ Skipping CREATE DATABASE due to limited MySQL permissions. Expecting DB to already exist.');
+        } else {
+          throw createErr;
+        }
+      } finally {
+        if (tempConn) {
+          await tempConn.end();
+        }
+      }
+    }
 
     // Now create the pool with the database
     await createPool();
@@ -77,11 +114,11 @@ export async function initDB() {
     console.error('');
     console.error('❌ DATABASE CONNECTION FAILED!');
     console.error('   Error:', err.message);
+    console.error('   Code:', err.code || 'UNKNOWN');
     console.error('');
-    console.error('   Fix: Open server/.env and set your MySQL password:');
-    console.error('   DB_PASSWORD=your_actual_mysql_root_password');
-    console.error('');
-    console.error('   Also make sure MySQL service is running.');
+    console.error('   Netlify fix: Set DB_HOST/DB_USER/DB_PASSWORD/DB_NAME (and DB_PORT if provided by host) in Site settings -> Environment variables.');
+    console.error('   DB_HOST must be a cloud MySQL hostname, not localhost.');
+    console.error('   If your DB user cannot create databases, set DB_SKIP_CREATE_DB=true in Netlify env vars.');
     console.error('');
   }
 }
@@ -90,7 +127,7 @@ export async function initDB() {
 function checkDB(req, res, next) {
   if (!dbReady || !pool) {
     return res.status(503).json({ 
-      error: 'Database not connected. Check server/.env file — make sure DB_PASSWORD is your actual MySQL password and MySQL is running.' 
+      error: 'Database not connected. In Netlify, configure DB_HOST/DB_USER/DB_PASSWORD/DB_NAME and DB_PORT (cloud MySQL, not localhost). If needed, set DB_SKIP_CREATE_DB=true.' 
     });
   }
   next();
@@ -120,8 +157,9 @@ function authenticateToken(req, res, next) {
 app.get('/api/health', (req, res) => {
   res.json({ 
     server: 'running', 
-    database: dbReady ? 'connected' : 'NOT connected — check .env',
+    database: dbReady ? 'connected' : 'NOT connected — check Netlify env vars',
     dbHost: process.env.DB_HOST || 'localhost',
+    dbPort: process.env.DB_PORT || '3306',
     dbUser: process.env.DB_USER || 'root',
     dbName: process.env.DB_NAME || 'procomm_literary',
   });
