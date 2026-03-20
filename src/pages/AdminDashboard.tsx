@@ -160,7 +160,7 @@ const AdminDashboard = () => {
                     <div style={dotStyle} />
                     <div>
                         <h1 style={topBarTitleStyle}>ADMIN DASHBOARD</h1>
-                        <p style={topBarSubtitleStyle}>HAWKINS LAB · COMMAND CENTER</p>
+                        <p style={topBarSubtitleStyle}>HAWKIN'S LAB · COMMAND CENTER</p>
                     </div>
                 </div>
                 <button onClick={handleLogout} style={logoutBtnStyle}
